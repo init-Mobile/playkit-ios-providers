@@ -169,12 +169,13 @@ public enum PhoenixMediaProviderError: PKError {
     
     @objc public var sessionProvider: SessionProvider?
     @objc public var assetId: String?
+    @objc public var epgId: String?
     @objc public var type: AssetType = .unset
     @objc public var refType: AssetReferenceType = .unset
     @objc public var formats: [String]?
     @objc public var fileIds: [String]?
     @objc public var playbackContextType: PlaybackContextType = .unset
-    @objc public var networkProtocol: String?
+    @objc public var networkProtocol: String = "https"
     @objc public var referrer: String?
     @objc public var urlType: String?
     @objc public var streamerType: String?
@@ -202,6 +203,14 @@ public enum PhoenixMediaProviderError: PKError {
     @discardableResult
     @nonobjc public func set(assetId: String?) -> Self {
         self.assetId = assetId
+        return self
+    }
+    
+    /// - Parameter epgId: The epgId if available for live/ iveDvr
+    /// - Returns: Self
+    @discardableResult
+    @nonobjc public func set(epgId: String?) -> Self {
+        self.epgId = epgId
         return self
     }
     
@@ -252,7 +261,7 @@ public enum PhoenixMediaProviderError: PKError {
     /// - Parameter networkProtocol: http/https
     /// - Returns: Self
     @discardableResult
-    @nonobjc public func set(networkProtocol: String?) -> Self {
+    @nonobjc public func set(networkProtocol: String) -> Self {
         self.networkProtocol = networkProtocol
         return self
     }
@@ -306,8 +315,6 @@ public enum PhoenixMediaProviderError: PKError {
         self.responseDelegate = responseDelegate
         return self
     }
-    
-    let defaultProtocol = "https"
     
     /// This  object is created before loading the media in order to make sure all required attributes are set and we are ready to load
     public struct LoaderInfo {
@@ -363,17 +370,16 @@ public enum PhoenixMediaProviderError: PKError {
             }
         }
         
-        let pr = self.networkProtocol ?? defaultProtocol
         let executor = self.executor ?? KNKRequestExecutor.shared
         
         let loaderParams = LoaderInfo(sessionProvider: sessionProvider,
                                       assetId: assetId,
                                       assetType: self.toAPIType(type: self.type),
-                                      assetRefType: self.toAPIType(type: self.refType),
+                                      assetRefType: PhoenixMediaProvider.toAPIType(type: self.refType),
                                       playbackContextType: self.toAPIType(type: self.playbackContextType),
                                       formats: self.formats,
                                       fileIds: self.fileIds,
-                                      networkProtocol: pr,
+                                      networkProtocol: self.networkProtocol,
                                       urlType: self.urlType,
                                       streamerType: self.streamerType,
                                       adapterData: self.adapterData,
@@ -613,7 +619,7 @@ public enum PhoenixMediaProviderError: PKError {
         let mediaEntry = PKMediaEntry(loaderInfo.assetId, sources: mediaSources, duration: TimeInterval(maxDuration))
         mediaEntry.name = asset?.name
         
-        mediaEntry.metadata = createMetadata(from: asset)
+        mediaEntry.metadata = createMetadata(from: asset, loaderInfo: loaderInfo)
         
         let metadata = asset?.arrayOfMetas()
         if let tags = metadata?["tags"] {
@@ -635,12 +641,17 @@ public enum PhoenixMediaProviderError: PKError {
         return (mediaEntry, nil)
     }
     
-    static func createMetadata(from asset: OTTMediaAsset?) -> [String: String] {
+    static func createMetadata(from asset: OTTMediaAsset?, loaderInfo: LoaderInfo) -> [String: String] {
         var metadata: [String: String] = asset?.arrayOfMetas() ?? [:]
         
         if let recordingAsset = asset as? OTTRecordingAsset {
             metadata["recordingId"] = recordingAsset.recordingId
             metadata["recordingType"] = recordingAsset.recordingType.map { $0.rawValue }
+        }
+        
+        // programAsset.epgId will be set both for OTTRecordingAsset and OTTProgramAsset
+        if let programAsset = asset as? OTTProgramAsset {
+            metadata["epgId"] = programAsset.epgId
         }
         
         if let type = asset?.type {
@@ -684,7 +695,7 @@ public enum PhoenixMediaProviderError: PKError {
         }
     }
     
-    func toAPIType(type: AssetReferenceType) -> AssetReferenceTypeAPI? {
+    static func toAPIType(type: AssetReferenceType) -> AssetReferenceTypeAPI? {
         switch type {
         case .media:
             return .media

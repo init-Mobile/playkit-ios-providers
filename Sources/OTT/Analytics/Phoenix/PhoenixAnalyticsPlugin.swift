@@ -21,6 +21,7 @@ public class PhoenixAnalyticsPlugin: BaseOTTAnalyticsPlugin {
             self.interval = config.timerInterval
             self.disableMediaHit = config.disableMediaHit
             self.disableMediaMark = config.disableMediaMark
+            self.isExperimentalLiveMediaHit = config.isExperimentalLiveMediaHit
         }
     }
     
@@ -73,12 +74,24 @@ public class PhoenixAnalyticsPlugin: BaseOTTAnalyticsPlugin {
             assetType = type
         }
         
+        if let metadataRecordingId = self.player?.mediaEntry?.metadata, let mediaRecordingId = metadataRecordingId["recordingId"] {
+            mediaId = mediaRecordingId
+        }
+  
+        var epgId: String?
+        if let bookmarkEpgId = config.epgId, !bookmarkEpgId.isEmpty {
+            epgId = bookmarkEpgId
+        } else if let metadataEpgId = self.player?.mediaEntry?.metadata, let mediaEpgId = metadataEpgId["epgId"] {
+            epgId = mediaEpgId
+        }
+        
         guard let requestBuilder: KalturaRequestBuilder = BookmarkService.actionAdd(baseURL: config.baseUrl,
                                                                                     partnerId: config.partnerId,
                                                                                     ks: config.ks,
                                                                                     eventType: type.rawValue.uppercased(),
                                                                                     currentTime: currentTime,
                                                                                     assetId: mediaId ?? "",
+                                                                                    epgId: epgId,
                                                                                     assetType: assetType,
                                                                                     fileId: fileId ?? "") else { return nil }
         

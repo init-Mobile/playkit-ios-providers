@@ -75,6 +75,9 @@ public enum OVPMediaProviderError: PKError {
     @objc public var referenceId: String?
     @objc public var uiconfId: NSNumber?
     @objc public var referrer: String?
+    
+    @objc public var useApiCaptions: Bool = false
+    
     public var executor: RequestExecutor?
     
     @objc public override init() {}
@@ -126,6 +129,16 @@ public enum OVPMediaProviderError: PKError {
     @discardableResult
     @nonobjc public func set(referrer: String?) -> Self {
         self.referrer = referrer
+        return self
+    }
+    
+    /// set the useApiCaptions option to populate Entry external captions.
+    ///
+    /// - Parameter useApiCaptions: Entry captions provided via API.
+    /// - Returns: Self
+    @discardableResult
+    @nonobjc public func set(useApiCaptions: Bool) -> Self {
+        self.useApiCaptions = useApiCaptions
         return self
     }
     
@@ -275,7 +288,6 @@ public enum OVPMediaProviderError: PKError {
                     }
                     
                     guard let baseEntry = ovpBaseEntryList?.objects?.last,
-                        let sources = ovpPlaybackContext?.sources,
                         let metadataList = ovpMetadataList?.objects
                         else {
                             PKLog.debug("Response is not containing entry info or playback data.")
@@ -295,7 +307,9 @@ public enum OVPMediaProviderError: PKError {
                     }
 
                     var mediaSources: [PKMediaSource] = [PKMediaSource]()
-                    sources.forEach { (source: OVPSource) in
+                    
+                    let sources = ovpPlaybackContext?.sources
+                    sources?.forEach { (source: OVPSource) in
                         // Detecting the source type
                         let format = FormatsHelper.getMediaFormat(format: source.format, hasDrm: source.drm != nil)
                         // If source type is not supported, source will not be created
@@ -329,8 +343,30 @@ public enum OVPMediaProviderError: PKError {
                     }
                     
                     let mediaEntry: PKMediaEntry = PKMediaEntry(baseEntry.id, sources: mediaSources, duration: baseEntry.duration)
-                    let metaDataItems = self.getMetadata(metadataList: metadataList, partnerId: partnerId, entryId: mediaEntry.id)
+                    var metaDataItems = self.getMetadata(metadataList: metadataList, partnerId: partnerId, entryId: mediaEntry.id)
                     
+                    if let baseEntry = baseEntry as? OVPExternalMediaEntry {
+                        
+                        if let sources = sources,
+                           baseEntry.externalSourceType != "YouTube" && sources.isEmpty {
+                            PKLog.debug("Response is not containing playback data.")
+                            callback(nil, OVPMediaProviderError.invalidResponse)
+                            return
+                        }
+                        
+                        metaDataItems["externalSourceType"] = baseEntry.externalSourceType
+                        metaDataItems["referenceId"] = baseEntry.referenceId
+                    } else {
+                        if let sources = sources, sources.isEmpty {
+                            PKLog.debug("Response is not containing playback data.")
+                            callback(nil, OVPMediaProviderError.invalidResponse)
+                            return
+                        }
+                    }
+                    
+                    if self.useApiCaptions {
+                        mediaEntry.externalSubtitles = self.createExternalSubtitles(ovpPlaybackContext: ovpPlaybackContext, ks: resKS)
+                    }
                     mediaEntry.name = baseEntry.name
                     mediaEntry.metadata = metaDataItems
                     mediaEntry.tags = baseEntry.tags
@@ -444,6 +480,40 @@ public enum OVPMediaProviderError: PKError {
         return playURL
     }
     
+    private func createExternalSubtitles(ovpPlaybackContext context: OVPPlaybackContext?, ks: String?) -> [PKExternalSubtitle]? {
+        
+        if let playbackCaptions = context?.playbackCaptions {
+            
+            return playbackCaptions.compactMap({
+                var webVttUrl = $0.webVttUrl
+                if let ks = ks, !ks.isEmpty,
+                   let url = URL(string: $0.webVttUrl) {
+                    
+                    if url.query == nil {
+                        let lastPathComponent = url.lastPathComponent
+                        
+                        webVttUrl = url
+                            .deletingLastPathComponent()
+                            .appendingPathComponent("ks")
+                            .appendingPathComponent(ks)
+                            .appendingPathComponent(lastPathComponent)
+                            .absoluteString
+                    } else {
+                        webVttUrl = url.appendingQueryComponent(key: "ks", value: ks).absoluteString
+                    }
+                }
+                
+                return PKExternalSubtitle(id: $0.description,
+                                          name: $0.label,
+                                          language: $0.languageCode,
+                                          vttURLString: webVttUrl,
+                                          duration: -1)
+            })
+        }
+        
+        return nil
+    }
+    
     private func mediaType(of type: EntryType?) -> MediaType {
         guard let type = type else {
             return .unknown
@@ -459,7 +529,7 @@ public enum OVPMediaProviderError: PKError {
         }
     }
     
-    @objc public func cancel(){
+    @objc public func cancel() {
         
     }
     
